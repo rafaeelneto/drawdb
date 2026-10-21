@@ -246,3 +246,18 @@
   stroke-dasharray: 12 8;
   animation: dash-right 1s linear infinite;
 }
+
+.relationship-focused .relationship-path {
+  stroke-width: 4;
+}
+
+/* Dimmed relations fade their shapes rather than the whole group: a group
+   opacity is composited offscreen again on every pan frame. */
+.relationship-dimmed path,
+.relationship-dimmed circle,
+.relationship-dimmed polygon,
+.relationship-dimmed rect,
+.relationship-dimmed text {
+  stroke-opacity: 0.12;
+  fill-opacity: 0.12;
+}

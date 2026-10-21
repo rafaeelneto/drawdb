@@ -16,6 +16,7 @@ import {
   IconCopyStroked,
   IconKeyStroked,
   IconLock,
+  IconEyeOpened,
   IconUnlock,
 } from "@douyinfe/semi-icons";
 import { nanoid } from "nanoid";
@@ -33,6 +34,7 @@ import {
   useDiagram,
   useSelect,
   useUndoRedo,
+  useFocus,
 } from "../../hooks";
 import { DiagramActionsContext } from "../../context/DiagramContext";
 import { SelectActionsContext } from "../../context/SelectContext";
@@ -64,6 +66,8 @@ export default memo(function Table({
   setLinkingLine,
 }) {
   const [hoveredField, setHoveredField] = useState(null);
+  const { focus, setFocus } = useFocus();
+  const isHighlighted = focus.tableId === tableData.id;
   const [hovered, setHovered] = useState(false);
   const [resizeEngaged, setResizeEngaged] = useState(false);
   const { layout } = useLayout();
@@ -308,6 +312,21 @@ export default memo(function Table({
                     }
                     disabled={layout.readOnly}
                     onClick={lockUnlockTable}
+                  />
+                  <Button
+                    size="small"
+                    type={isHighlighted ? "primary" : "tertiary"}
+                    icon={<IconEyeOpened size="small" />}
+                    aria-label={t("highlight_relationships")}
+                    title={t("highlight_relationships")}
+                    onClick={() =>
+                      setFocus(
+                        isHighlighted
+                          ? { areaId: null, tableId: null }
+                          : { areaId: null, tableId: tableData.id },
+                      )
+                    }
+                    onPointerDown={(e) => e.stopPropagation()}
                   />
                   <Button
                     size="small"

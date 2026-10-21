@@ -1,6 +1,11 @@
 import { createContext, useState } from "react";
 import { Action, ObjectType, defaultBlue } from "../data/constants";
-import { useTransform, useUndoRedo, useSelect, useCollab } from "../hooks";
+import {
+  useTransformActions,
+  useUndoRedo,
+  useSelect,
+  useCollab,
+} from "../hooks";
 import { Toast } from "@douyinfe/semi-ui";
 import { useTranslation } from "react-i18next";
 import { nanoid } from "nanoid";
@@ -10,7 +15,7 @@ export const ViewsContext = createContext(null);
 export default function ViewsContextProvider({ children }) {
   const { t } = useTranslation();
   const [views, setViews] = useState([]);
-  const { transform } = useTransform();
+  const { getTransform } = useTransformActions();
   const { setUndoStack, setRedoStack } = useUndoRedo();
   const { selectedElement, setSelectedElement } = useSelect();
   const { emitDelta, isApplyingRemoteRef } = useCollab();
@@ -22,8 +27,8 @@ export default function ViewsContextProvider({ children }) {
     const newView = {
       id,
       name: `view_${views.length}`,
-      x: transform.pan.x,
-      y: transform.pan.y,
+      x: getTransform().pan.x,
+      y: getTransform().pan.y,
       baseTableId: null,
       joins: [],
       columns: [],

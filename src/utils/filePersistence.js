@@ -323,7 +323,7 @@ const KEY_ORDER = {
     "height",
     "locked",
   ],
-  area: ["id", "name", "color", "x", "y", "width", "height", "locked"],
+  area: ["id", "name", "label", "color", "x", "y", "width", "height", "locked"],
 };
 
 function ordered(obj, kind, { round = false } = {}) {

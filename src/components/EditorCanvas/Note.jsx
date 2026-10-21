@@ -20,7 +20,7 @@ import {
   useSelect,
   useNotes,
   useSaveState,
-  useTransform,
+  useTransformActions,
   useSettings,
 } from "../../hooks";
 import { useTranslation } from "react-i18next";
@@ -37,7 +37,7 @@ export default memo(function Note({ data, onPointerDown }) {
   const { setSaveState } = useSaveState();
   const { updateNote, deleteNote } = useNotes();
   const { setUndoStack, setRedoStack } = useUndoRedo();
-  const { transform } = useTransform();
+  const { getTransform } = useTransformActions();
   const { settings } = useSettings();
   const {
     selectedElement,
@@ -296,7 +296,7 @@ export default memo(function Note({ data, onPointerDown }) {
           }}
           onPointerMove={(e) => {
             if (!resizing) return;
-            const delta = e.movementX / (transform?.zoom || 1);
+            const delta = e.movementX / (getTransform().zoom || 1);
             const currentWidth = data.width ?? noteWidth;
             let proposedWidth = currentWidth - delta;
             let proposedX = data.x + delta;
@@ -355,7 +355,7 @@ export default memo(function Note({ data, onPointerDown }) {
           }}
           onPointerMove={(e) => {
             if (!resizing) return;
-            const delta = e.movementX / (transform?.zoom || 1);
+            const delta = e.movementX / (getTransform().zoom || 1);
             const next = Math.max(
               MIN_NOTE_WIDTH,
               (data.width ?? noteWidth) + delta,

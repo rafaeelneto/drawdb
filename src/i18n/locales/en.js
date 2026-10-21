@@ -308,6 +308,12 @@ const en = {
     insert_sql: "Insert SQL",
     upload_file: "Upload file",
     show_comments: "Show comments",
+    relationships_mode: "Relations",
+    relationships_mode_show: "Shown",
+    relationships_mode_dim: "Dimmed",
+    relationships_mode_hide: "Hidden",
+    focus_area: "Focus area",
+    highlight_relationships: "Highlight relationships",
     sql_header: "SQL header",
     sql_header_description:
       "Statements written at the top of every SQL export, before the schema.",

@@ -19,6 +19,7 @@ import {
   useLayout,
   useSettings,
   useTransform,
+  useTransformActions,
   useDiagram,
   useUndoRedo,
   useAreas,
@@ -65,6 +66,18 @@ export const IdContext = createContext({
 
 const SIDEPANEL_MIN_WIDTH = 374;
 
+// Pan/zoom are kept in IndexedDB (per file name), never in the file. Lives in
+// its own component so that panning doesn't re-render the whole workspace.
+function TransformPersistence() {
+  const { transform } = useTransform();
+  useEffect(() => {
+    if (!hasFileHandle()) return;
+    const id = setTimeout(() => saveTransform(transform), 500);
+    return () => clearTimeout(id);
+  }, [transform]);
+  return null;
+}
+
 export default function WorkSpace({ forcedDiagramId } = {}) {
   const [gistId, setGistId] = useState("");
   const [version, setVersion] = useState("");
@@ -89,7 +102,7 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
   const { areas, setAreas } = useAreas();
   const { notes, setNotes } = useNotes();
   const { saveState, setSaveState } = useSaveState();
-  const { transform, setTransform } = useTransform();
+  const { setTransform, getTransform } = useTransformActions();
   const { enums, setEnums } = useEnums();
   const { views, setViews } = useViews();
   const {
@@ -136,8 +149,8 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
       areas,
       views,
       sqlHeader,
-      pan: transform.pan,
-      zoom: transform.zoom,
+      pan: getTransform().pan,
+      zoom: getTransform().zoom,
       ...(databases[database].hasEnums && { enums }),
       ...(databases[database].hasTypes && { types }),
     }),
@@ -151,7 +164,7 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
       areas,
       views,
       sqlHeader,
-      transform,
+      getTransform,
       enums,
       types,
     ],
@@ -204,8 +217,8 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
           areas: areas,
           views: views,
           sqlHeader: sqlHeader,
-          pan: transform.pan,
-          zoom: transform.zoom,
+          pan: getTransform().pan,
+          zoom: getTransform().zoom,
           loadedFromGistId: loadedFromGistId,
           ...(databases[database].hasEnums && { enums: enums }),
           ...(databases[database].hasTypes && { types: types }),
@@ -230,8 +243,8 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
           views: views,
           sqlHeader: sqlHeader,
           gistId: gistId ?? "",
-          pan: transform.pan,
-          zoom: transform.zoom,
+          pan: getTransform().pan,
+          zoom: getTransform().zoom,
           loadedFromGistId: loadedFromGistId,
           ...(databases[database].hasEnums && { enums: enums }),
           ...(databases[database].hasTypes && { types: types }),
@@ -256,7 +269,7 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
     sqlHeader,
     types,
     title,
-    transform,
+    getTransform,
     setSaveState,
     setLastSaved,
     database,
@@ -433,13 +446,6 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
     dismissPendingFile();
     setPendingFileName(null);
   };
-
-  // Pan/zoom are kept in IndexedDB (per file name), never in the file.
-  useEffect(() => {
-    if (!hasFileHandle()) return;
-    const id = setTimeout(() => saveTransform(transform), 500);
-    return () => clearTimeout(id);
-  }, [transform]);
 
   // ControlPanel asks for an open/new file through this event.
   useEffect(() => {
@@ -698,7 +704,6 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
     views?.length,
     types?.length,
     relationships?.length,
-    transform.zoom,
     title,
     gistId,
     sqlHeader,
@@ -730,6 +735,7 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
 
   return (
     <div className="h-full flex flex-col overflow-hidden theme">
+      <TransformPersistence />
       <IdContext.Provider value={{ gistId, setGistId, version, setVersion }}>
         <ControlPanel
           title={title}

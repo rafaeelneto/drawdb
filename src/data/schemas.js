@@ -89,6 +89,7 @@ export const areaSchema = {
     width: { type: "number" },
     height: { type: "number" },
     locked: { type: "boolean" },
+    label: { type: "string" },
     color: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" },
   },
   required: ["id", "name", "x", "y", "width", "height", "color"],

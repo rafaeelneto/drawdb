@@ -4,6 +4,7 @@ import TablesContextProvider from "../context/DiagramContext";
 import UndoRedoContextProvider from "../context/UndoRedoContext";
 import SelectContextProvider from "../context/SelectContext";
 import AreasContextProvider from "../context/AreasContext";
+import FocusContextProvider from "../context/FocusContext";
 import NotesContextProvider from "../context/NotesContext";
 import TypesContextProvider from "../context/TypesContext";
 import SettingsContextProvider from "../context/SettingsContext";
@@ -22,21 +23,23 @@ export default function Editor() {
         <TransformContextProvider>
           <UndoRedoContextProvider>
             <SelectContextProvider>
-              <AreasContextProvider>
-                <NotesContextProvider>
-                  <TypesContextProvider>
-                    <EnumsContextProvider>
-                      <ViewsContextProvider>
-                        <TablesContextProvider>
-                          <SaveStateContextProvider>
-                            <WorkSpace />
-                          </SaveStateContextProvider>
-                        </TablesContextProvider>
-                      </ViewsContextProvider>
-                    </EnumsContextProvider>
-                  </TypesContextProvider>
-                </NotesContextProvider>
-              </AreasContextProvider>
+              <FocusContextProvider>
+                <AreasContextProvider>
+                  <NotesContextProvider>
+                    <TypesContextProvider>
+                      <EnumsContextProvider>
+                        <ViewsContextProvider>
+                          <TablesContextProvider>
+                            <SaveStateContextProvider>
+                              <WorkSpace />
+                            </SaveStateContextProvider>
+                          </TablesContextProvider>
+                        </ViewsContextProvider>
+                      </EnumsContextProvider>
+                    </TypesContextProvider>
+                  </NotesContextProvider>
+                </AreasContextProvider>
+              </FocusContextProvider>
             </SelectContextProvider>
           </UndoRedoContextProvider>
         </TransformContextProvider>
