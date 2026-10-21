@@ -7,7 +7,12 @@ import {
   useRef,
   useState,
 } from "react";
-import { Cardinality, ObjectType, Tab } from "../../data/constants";
+import {
+  Cardinality,
+  ObjectType,
+  Tab,
+  defaultRelationshipColor,
+} from "../../data/constants";
 import { calcPath, calcCompositePath } from "../../utils/calcPath";
 import { useSettings, useLayout, useSelect } from "../../hooks";
 import { useTranslation } from "react-i18next";
@@ -157,6 +162,14 @@ const RelationshipPath = memo(function RelationshipPath({
     return calcPath(pathValues, 1, settings.showComments);
   }, [pathValues, composite, settings.showComments]);
 
+  // relationships left on the default grey follow the color of their table
+  const color =
+    !data.color || data.color === defaultRelationshipColor
+      ? startTable?.color ?? defaultRelationshipColor
+      : data.color;
+  const nullable = !startTable?.fields?.find((f) => f.id === data.startFieldId)
+    ?.notNull;
+
   const pathRef = useRef();
   const labelRef = useRef();
   const [hovered, setHovered] = useState(false);
@@ -172,7 +185,7 @@ const RelationshipPath = memo(function RelationshipPath({
     const labelWidth = labelBox?.width ?? 0;
     const labelHeight = labelBox?.height ?? 0;
 
-    let labelPoint, startPoint, endPoint;
+    let labelPoint, startPoint, endPoint, linkStart, linkEnd;
     if (composite) {
       labelPoint = composite.labelPoint;
       startPoint = composite.startCardinality;
@@ -185,6 +198,16 @@ const RelationshipPath = memo(function RelationshipPath({
       endPoint = path.getPointAtLength(pathLength - cardinalityOffset);
     }
 
+    // link markers sit on the field rows, whatever the path is made of
+    const path = pathRef.current;
+    const total = path.getTotalLength();
+    linkStart = path.getPointAtLength(0);
+    linkEnd = path.getPointAtLength(total);
+    const beforeEnd = path.getPointAtLength(Math.max(total - 2, 0));
+    const endAngle =
+      (Math.atan2(linkEnd.y - beforeEnd.y, linkEnd.x - beforeEnd.x) * 180) /
+      Math.PI;
+
     setAnchors({
       label: {
         x: labelPoint.x - labelWidth / 2,
@@ -192,6 +215,8 @@ const RelationshipPath = memo(function RelationshipPath({
       },
       start: { x: startPoint.x, y: startPoint.y },
       end: { x: endPoint.x, y: endPoint.y },
+      linkStart: { x: linkStart.x, y: linkStart.y },
+      linkEnd: { x: linkEnd.x, y: linkEnd.y, angle: endAngle },
     });
   }, [d, composite, data.name, settings.showRelationshipLabels]);
 
@@ -240,15 +265,33 @@ const RelationshipPath = memo(function RelationshipPath({
         ref={pathRef}
         d={d}
         className="relationship-path"
-        style={{ stroke: hovered ? undefined : data.color }}
+        style={{ stroke: hovered ? undefined : color }}
+        strokeDasharray={nullable ? "6 5" : undefined}
         fill="none"
         cursor="pointer"
       />
+      {anchors && (
+        <>
+          <circle
+            cx={anchors.linkStart.x}
+            cy={anchors.linkStart.y}
+            r={4}
+            fill={color}
+            className="group-hover:fill-sky-600"
+          />
+          <polygon
+            points="0,0 -10,-5 -10,5"
+            transform={`translate(${anchors.linkEnd.x} ${anchors.linkEnd.y}) rotate(${anchors.linkEnd.angle})`}
+            fill={color}
+            className="group-hover:fill-sky-600"
+          />
+        </>
+      )}
       {settings.showRelationshipLabels && (
         <text
           x={anchors?.label.x ?? 0}
           y={anchors?.label.y ?? 0}
-          fill={data.color ?? (settings.mode === "dark" ? "lightgrey" : "#333")}
+          fill={color ?? (settings.mode === "dark" ? "lightgrey" : "#333")}
           fontSize={labelFontSize}
           fontWeight={500}
           ref={labelRef}
@@ -263,13 +306,13 @@ const RelationshipPath = memo(function RelationshipPath({
             x={anchors.start.x}
             y={anchors.start.y}
             text={cardinalityStart}
-            color={data.color}
+            color={color}
           />
           <CardinalityLabel
             x={anchors.end.x}
             y={anchors.end.y}
             text={cardinalityEnd}
-            color={data.color}
+            color={color}
           />
         </>
       )}

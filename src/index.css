@@ -234,14 +234,15 @@
   stroke-width: 2.5;
   fill: none;
   stroke-linecap: butt;
-  transition: stroke 0.2s ease, stroke-width 0.2s ease;
+  transition:
+    stroke 0.2s ease,
+    stroke-width 0.2s ease;
   pointer-events: stroke;
 }
 
 .group:hover .relationship-path {
   stroke: #0084d1;
-  stroke-width: 6;
+  stroke-width: 4;
   stroke-dasharray: 12 8;
   animation: dash-right 1s linear infinite;
-  
 }
