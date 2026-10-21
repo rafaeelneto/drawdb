@@ -23,3 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+# Chrome File System Access temp swap files
+*.crswap

@@ -24,6 +24,8 @@ const en = {
     close_file: "Close linked file",
     saved_to_file: "Saved. Changes are now synced with the file.",
     reloaded_from_file: "Reloaded from file",
+    reopen_file_prompt: "Reconnect to {{name}}?",
+    reopen: "Reopen",
     save_as: "Save as",
     save_as_template: "Save as template",
     template_saved: "Template saved!",

@@ -36,6 +36,9 @@ import {
   saveFile,
   readIfChanged,
   restoreFile,
+  getPendingFileName,
+  reopenPendingFile,
+  dismissPendingFile,
   saveTransform,
   loadTransform,
   serializeDiagram,
@@ -303,13 +306,17 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
     t,
   ]);
 
+  const writeToFileRef = useRef(writeToFile);
+  writeToFileRef.current = writeToFile;
+
   const applyFileText = useCallback(
-    (text, { silent } = {}) => {
+    (text, { silent, onError } = {}) => {
       let parsed;
       try {
         parsed = parseDiagram(text);
       } catch (err) {
-        Toast.error(err.message);
+        if (onError) onError(err);
+        else Toast.error(err.message);
         return false;
       }
       if (parsed.database) setDatabase(parsed.database);
@@ -349,16 +356,41 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
   applyFileTextRef.current = applyFileText;
   const saveStateRef = useRef(saveState);
   saveStateRef.current = saveState;
+  const writeTimerRef = useRef(null);
   useEffect(() => {
     let busy = false;
+    // An external writer may be mid-write: an invalid file is retried on the
+    // next ticks and only reported if it stays invalid.
+    const invalid = { count: 0, reported: false };
+    const MAX_SILENT_RETRIES = 3;
     const check = async () => {
       if (busy || document.hidden || !hasFileHandle()) return;
       // a local edit is about to be written; it wins over the stale file
-      if (saveStateRef.current === State.SAVING) return;
+      if (saveStateRef.current === State.SAVING || writeTimerRef.current)
+        return;
       busy = true;
       try {
         const text = await readIfChanged();
-        if (text !== null) applyFileTextRef.current(text);
+        if (text === null) {
+          if (invalid.count > 0) invalid.count++;
+        } else {
+          invalid.count = 0;
+          invalid.reported = false;
+          const ok = applyFileTextRef.current(text, {
+            onError: () => {
+              invalid.count = 1;
+            },
+          });
+          invalid.text = ok ? null : text;
+        }
+        if (
+          invalid.count > MAX_SILENT_RETRIES &&
+          !invalid.reported &&
+          invalid.text
+        ) {
+          invalid.reported = true;
+          applyFileTextRef.current(invalid.text);
+        }
       } finally {
         busy = false;
       }
@@ -380,11 +412,27 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
     if (stored) setTransformRef.current(stored);
   }, []);
 
+  const [pendingFileName, setPendingFileName] = useState(null);
   useEffect(() => {
     restoreFile().then((text) => {
       if (text !== null) applyOpenedFile(text);
+      else setPendingFileName(getPendingFileName());
     });
   }, [applyOpenedFile]);
+
+  const reopenFile = async () => {
+    try {
+      const text = await reopenPendingFile();
+      if (text !== null) await applyOpenedFile(text);
+    } catch (err) {
+      Toast.error(err.message);
+    }
+    setPendingFileName(null);
+  };
+  const dismissReopen = () => {
+    dismissPendingFile();
+    setPendingFileName(null);
+  };
 
   // Pan/zoom are kept in IndexedDB (per file name), never in the file.
   useEffect(() => {
@@ -663,8 +711,16 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
     if (saveState !== State.SAVING) return;
 
     save();
-    writeToFile();
-  }, [saveState, layout, save, writeToFile]);
+    // Debounced: a drag fires a save per movement.
+    clearTimeout(writeTimerRef.current);
+    writeTimerRef.current = setTimeout(async () => {
+      try {
+        await writeToFileRef.current();
+      } finally {
+        writeTimerRef.current = null;
+      }
+    }, 400);
+  }, [saveState, layout, save]);
 
   useEffect(() => {
     document.title = "Editor | drawDB";
@@ -724,6 +780,27 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
               >
                 {t("return_to_current")}
               </Button>
+            </div>
+          )}
+          {pendingFileName && (
+            <div className="pointer-events-none absolute inset-x-0 top-3 z-50 flex justify-center">
+              <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-blue-300 bg-blue-50 px-5 py-1.5 shadow-md dark:border-sky-900/50 dark:bg-sky-900/30">
+                <i className="bi bi-file-earmark-code" />
+                <span className="text-sm">
+                  {t("reopen_file_prompt", { name: pendingFileName })}
+                </span>
+                <Button size="small" theme="solid" onClick={reopenFile}>
+                  {t("reopen")}
+                </Button>
+                <Button
+                  size="small"
+                  theme="borderless"
+                  type="tertiary"
+                  aria-label={t("dismiss")}
+                  icon={<i className="bi bi-x-lg" />}
+                  onClick={dismissReopen}
+                />
+              </div>
             </div>
           )}
           {(cloudOnly || typeof extensions.moveToCloudUpgrade === "function") &&

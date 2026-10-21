@@ -117,20 +117,47 @@ async function setHandle(handle) {
   emit();
 }
 
-/** Re-attach the previously used file, if the permission is still granted. */
+let pendingHandle = null;
+
+/**
+ * Re-attach the previously used file. Returns its text when the permission is
+ * still granted; otherwise remembers the handle so the UI can offer a
+ * "Reopen" button (requestPermission needs a user gesture).
+ */
 export async function restoreFile() {
   if (!hasFileSystemAccess || fileHandle) return null;
   const handle = await idbGet();
   if (!handle) return null;
   try {
     const perm = await handle.queryPermission({ mode: "readwrite" });
-    if (perm !== "granted") return null;
+    if (perm !== "granted") {
+      pendingHandle = handle;
+      return null;
+    }
     fileHandle = handle;
     emit();
     return await readFile();
   } catch {
     return null;
   }
+}
+
+export const getPendingFileName = () => pendingHandle?.name ?? null;
+
+/** Must be called from a click handler. Returns the file text or null. */
+export async function reopenPendingFile() {
+  const handle = pendingHandle;
+  if (!handle) return null;
+  const perm = await handle.requestPermission({ mode: "readwrite" });
+  if (perm !== "granted") return null;
+  pendingHandle = null;
+  await setHandle(handle);
+  return await readFile();
+}
+
+export async function dismissPendingFile() {
+  pendingHandle = null;
+  await idbSet(null);
 }
 
 async function readFile() {
@@ -229,23 +256,109 @@ function downloadFallback(text, name) {
 
 // --- diagram <-> file text
 
+// Fixed key order + integer x/y keep git diffs small and the file easy for
+// humans and Claude Code to read. Unknown keys follow, sorted alphabetically.
+const KEY_ORDER = {
+  root: [
+    "title",
+    "database",
+    "tables",
+    "relationships",
+    "notes",
+    "subjectAreas",
+    "types",
+    "enums",
+    "views",
+    "sqlHeader",
+  ],
+  table: [
+    "id",
+    "name",
+    "comment",
+    "color",
+    "x",
+    "y",
+    "width",
+    "locked",
+    "hidden",
+    "collapsed",
+    "fields",
+    "indices",
+    "uniqueConstraints",
+    "inherits",
+  ],
+  field: [
+    "id",
+    "name",
+    "type",
+    "size",
+    "values",
+    "primary",
+    "unique",
+    "notNull",
+    "increment",
+    "default",
+    "check",
+    "comment",
+  ],
+  relationship: [
+    "id",
+    "name",
+    "startTableId",
+    "startFieldId",
+    "endTableId",
+    "endFieldId",
+    "cardinality",
+    "updateConstraint",
+    "deleteConstraint",
+  ],
+  note: [
+    "id",
+    "title",
+    "content",
+    "color",
+    "x",
+    "y",
+    "width",
+    "height",
+    "locked",
+  ],
+  area: ["id", "name", "color", "x", "y", "width", "height", "locked"],
+};
+
+function ordered(obj, kind, { round = false } = {}) {
+  if (!obj || typeof obj !== "object") return obj;
+  const known = KEY_ORDER[kind];
+  const rest = Object.keys(obj)
+    .filter((k) => !known.includes(k))
+    .sort();
+  const out = {};
+  for (const k of [...known, ...rest]) {
+    if (!(k in obj) || obj[k] === undefined) continue;
+    out[k] =
+      round && (k === "x" || k === "y") && typeof obj[k] === "number"
+        ? Math.round(obj[k])
+        : obj[k];
+  }
+  return out;
+}
+
 export function serializeDiagram(d) {
-  return JSON.stringify(
-    {
-      title: d.title,
-      database: d.database,
-      tables: d.tables,
-      relationships: d.relationships,
-      notes: d.notes,
-      subjectAreas: d.subjectAreas,
-      types: d.types,
-      enums: d.enums,
-      views: d.views,
-      sqlHeader: d.sqlHeader,
-    },
-    null,
-    2,
-  );
+  const normalized = {
+    ...d,
+    tables: (d.tables ?? []).map((t) => ({
+      ...ordered(t, "table", { round: true }),
+      fields: (t.fields ?? []).map((f) => ordered(f, "field")),
+    })),
+    relationships: (d.relationships ?? []).map((r) =>
+      ordered(r, "relationship"),
+    ),
+    notes: (d.notes ?? []).map((n) => ordered(n, "note", { round: true })),
+    subjectAreas: (d.subjectAreas ?? []).map((a) =>
+      ordered(a, "area", { round: true }),
+    ),
+  };
+  return JSON.stringify(ordered(normalized, "root"), null, 2) + "\n";
 }
 
 /** Throws an Error with a readable message when the text is not a valid diagram. */
