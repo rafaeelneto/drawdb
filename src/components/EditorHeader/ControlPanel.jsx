@@ -76,6 +76,13 @@ import {
   useNavigateWithParams,
 } from "../../hooks";
 import { enterFullscreen, exitFullscreen } from "../../utils/fullscreen";
+import {
+  openFile,
+  saveFileAs,
+  closeFile,
+  hasFileHandle,
+  serializeDiagram,
+} from "../../utils/filePersistence";
 import { dataURItoBlob } from "../../utils/utils";
 import {
   IconAddArea,
@@ -1092,6 +1099,40 @@ export default function ControlPanel({
     }
     setSaveState(State.SAVING);
   };
+  const openLocalFile = async () => {
+    try {
+      const text = await openFile();
+      if (text !== null) {
+        window.dispatchEvent(
+          new CustomEvent("drawdb:file-opened", { detail: text }),
+        );
+      }
+    } catch (err) {
+      Toast.error(err.message);
+    }
+  };
+  const saveLocalFileAs = async () => {
+    try {
+      const ok = await saveFileAs(
+        serializeDiagram({
+          title,
+          database,
+          tables,
+          relationships,
+          notes,
+          subjectAreas: areas,
+          types,
+          enums,
+          views,
+          sqlHeader,
+        }),
+        `${title}.json`,
+      );
+      if (ok) Toast.success(t("saved_to_file"));
+    } catch (err) {
+      Toast.error(err.message);
+    }
+  };
   const { cloud, local } = useDiagramList();
   const recentlyOpenedDiagrams = useMemo(() => {
     const sorted = sortDiagrams(mergeDiagrams(cloud, local), {
@@ -1226,6 +1267,16 @@ export default function ControlPanel({
         ],
 
         function: () => {},
+      },
+      open_file: {
+        function: openLocalFile,
+      },
+      save_to_file: {
+        function: saveLocalFileAs,
+      },
+      close_file: {
+        function: () => closeFile(),
+        disabled: !hasFileHandle(),
       },
       save: {
         function: save,

@@ -30,7 +30,17 @@ import {
   useNavigateWithParams,
 } from "../hooks";
 import FloatingControls from "./FloatingControls";
-import { Button, Modal, Tag } from "@douyinfe/semi-ui";
+import { Button, Modal, Tag, Toast } from "@douyinfe/semi-ui";
+import {
+  hasFileHandle,
+  saveFile,
+  readIfChanged,
+  restoreFile,
+  saveTransform,
+  loadTransform,
+  serializeDiagram,
+  parseDiagram,
+} from "../utils/filePersistence";
 import { IconAlertTriangle } from "@douyinfe/semi-icons";
 import { useTranslation } from "react-i18next";
 import { databases } from "../data/databases";
@@ -255,6 +265,140 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
     loadedDiagramId,
     navigate,
   ]);
+
+  // --- local file mode: mirror the diagram into the opened JSON file
+  const writeToFile = useCallback(async () => {
+    if (!hasFileHandle()) return;
+    try {
+      await saveFile(
+        serializeDiagram({
+          title,
+          database,
+          tables,
+          relationships,
+          notes,
+          subjectAreas: areas,
+          types,
+          enums,
+          views,
+          sqlHeader,
+        }),
+        `${title}.json`,
+      );
+    } catch (err) {
+      console.warn("file save failed:", err);
+      Toast.error(t("failed_to_save"));
+    }
+  }, [
+    title,
+    database,
+    tables,
+    relationships,
+    notes,
+    areas,
+    types,
+    enums,
+    views,
+    sqlHeader,
+    t,
+  ]);
+
+  const applyFileText = useCallback(
+    (text, { silent } = {}) => {
+      let parsed;
+      try {
+        parsed = parseDiagram(text);
+      } catch (err) {
+        Toast.error(err.message);
+        return false;
+      }
+      if (parsed.database) setDatabase(parsed.database);
+      if (parsed.title) setTitle(parsed.title);
+      setTables(parsed.tables);
+      setRelationships(parsed.relationships);
+      setNotes(parsed.notes);
+      setAreas(parsed.subjectAreas);
+      setTypes(parsed.types ?? []);
+      setEnums(parsed.enums ?? []);
+      setViews(parsed.views ?? []);
+      setSqlHeader(parsed.sqlHeader ?? "");
+      setUndoStack([]);
+      setRedoStack([]);
+      if (!silent) Toast.success(t("reloaded_from_file"));
+      return true;
+    },
+    [
+      setDatabase,
+      setTitle,
+      setTables,
+      setRelationships,
+      setNotes,
+      setAreas,
+      setTypes,
+      setEnums,
+      setViews,
+      setSqlHeader,
+      setUndoStack,
+      setRedoStack,
+      t,
+    ],
+  );
+
+  // Poll the file for external edits (text editor, Claude Code, ...).
+  const applyFileTextRef = useRef(applyFileText);
+  applyFileTextRef.current = applyFileText;
+  const saveStateRef = useRef(saveState);
+  saveStateRef.current = saveState;
+  useEffect(() => {
+    let busy = false;
+    const check = async () => {
+      if (busy || document.hidden || !hasFileHandle()) return;
+      // a local edit is about to be written; it wins over the stale file
+      if (saveStateRef.current === State.SAVING) return;
+      busy = true;
+      try {
+        const text = await readIfChanged();
+        if (text !== null) applyFileTextRef.current(text);
+      } finally {
+        busy = false;
+      }
+    };
+    const id = setInterval(check, 1000);
+    window.addEventListener("focus", check);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("focus", check);
+    };
+  }, []);
+
+  // Re-attach the file used in the previous session, when still permitted.
+  const setTransformRef = useRef(setTransform);
+  setTransformRef.current = setTransform;
+  const applyOpenedFile = useCallback(async (text) => {
+    if (!applyFileTextRef.current(text, { silent: true })) return;
+    const stored = await loadTransform();
+    if (stored) setTransformRef.current(stored);
+  }, []);
+
+  useEffect(() => {
+    restoreFile().then((text) => {
+      if (text !== null) applyOpenedFile(text);
+    });
+  }, [applyOpenedFile]);
+
+  // Pan/zoom are kept in IndexedDB (per file name), never in the file.
+  useEffect(() => {
+    if (!hasFileHandle()) return;
+    const id = setTimeout(() => saveTransform(transform), 500);
+    return () => clearTimeout(id);
+  }, [transform]);
+
+  // ControlPanel asks for an open/new file through this event.
+  useEffect(() => {
+    const onOpened = (e) => applyOpenedFile(e.detail);
+    window.addEventListener("drawdb:file-opened", onOpened);
+    return () => window.removeEventListener("drawdb:file-opened", onOpened);
+  }, [applyOpenedFile]);
 
   const moveToCloud = useCallback(async () => {
     if (typeof extensions.cloudSave !== "function" || !loadedDiagramId) return;
@@ -519,7 +663,8 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
     if (saveState !== State.SAVING) return;
 
     save();
-  }, [saveState, layout, save]);
+    writeToFile();
+  }, [saveState, layout, save, writeToFile]);
 
   useEffect(() => {
     document.title = "Editor | drawDB";
