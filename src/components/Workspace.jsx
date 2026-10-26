@@ -19,6 +19,7 @@ import {
   useLayout,
   useSettings,
   useTransform,
+  useTransformActions,
   useDiagram,
   useUndoRedo,
   useAreas,
@@ -31,7 +32,20 @@ import {
 } from "../hooks";
 import FloatingControls from "./FloatingControls";
 import StartModal from "./StartModal";
-import { Button, Modal } from "@douyinfe/semi-ui";
+import { Button, Modal, Toast } from "@douyinfe/semi-ui";
+import {
+  hasFileHandle,
+  saveFile,
+  readIfChanged,
+  restoreFile,
+  getPendingFileName,
+  reopenPendingFile,
+  dismissPendingFile,
+  saveTransform,
+  loadTransform,
+  serializeDiagram,
+  parseDiagram,
+} from "../utils/filePersistence";
 import { IconAlertTriangle } from "@douyinfe/semi-icons";
 import { useTranslation } from "react-i18next";
 import { databases } from "../data/databases";
@@ -52,6 +66,29 @@ export const IdContext = createContext({
 });
 
 const SIDEPANEL_MIN_WIDTH = 374;
+
+// Pan/zoom are kept in IndexedDB (per file name), never in the file. Lives in
+// its own component so that panning doesn't re-render the whole workspace.
+function TransformPersistence() {
+  const { transform } = useTransform();
+  useEffect(() => {
+    if (!hasFileHandle()) return;
+    const id = setTimeout(() => saveTransform(transform), 500);
+    return () => clearTimeout(id);
+  }, [transform]);
+
+  // without a file, zoom is saved with the diagram, so autosave on zoom
+  const { settings } = useSettings();
+  const { setSaveState } = useSaveState();
+  const { tables } = useDiagram();
+  useEffect(() => {
+    if (hasFileHandle() || !settings.autosave || tables.length === 0) return;
+    const timer = setTimeout(() => setSaveState(State.SAVING), 500);
+    return () => clearTimeout(timer);
+  }, [transform.zoom, settings.autosave, tables.length, setSaveState]);
+
+  return null;
+}
 
 export default function WorkSpace({ forcedDiagramId } = {}) {
   const [gistId, setGistId] = useState("");
@@ -78,7 +115,7 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
   const { areas, setAreas } = useAreas();
   const { notes, setNotes } = useNotes();
   const { saveState, setSaveState } = useSaveState();
-  const { transform, setTransform } = useTransform();
+  const { setTransform, getTransform } = useTransformActions();
   const { enums, setEnums } = useEnums();
   const { views, setViews } = useViews();
   const {
@@ -125,8 +162,8 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
       areas,
       views,
       sqlHeader,
-      pan: transform.pan,
-      zoom: transform.zoom,
+      pan: getTransform().pan,
+      zoom: getTransform().zoom,
       ...(databases[database].hasEnums && { enums }),
       ...(databases[database].hasTypes && { types }),
     }),
@@ -140,7 +177,7 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
       areas,
       views,
       sqlHeader,
-      transform,
+      getTransform,
       enums,
       types,
     ],
@@ -193,8 +230,8 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
           areas: areas,
           views: views,
           sqlHeader: sqlHeader,
-          pan: transform.pan,
-          zoom: transform.zoom,
+          pan: getTransform().pan,
+          zoom: getTransform().zoom,
           loadedFromGistId: loadedFromGistId,
           ...(databases[database].hasEnums && { enums: enums }),
           ...(databases[database].hasTypes && { types: types }),
@@ -219,8 +256,8 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
           views: views,
           sqlHeader: sqlHeader,
           gistId: gistId ?? "",
-          pan: transform.pan,
-          zoom: transform.zoom,
+          pan: getTransform().pan,
+          zoom: getTransform().zoom,
           loadedFromGistId: loadedFromGistId,
           ...(databases[database].hasEnums && { enums: enums }),
           ...(databases[database].hasTypes && { types: types }),
@@ -245,7 +282,7 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
     sqlHeader,
     types,
     title,
-    transform,
+    getTransform,
     setSaveState,
     setLastSaved,
     database,
@@ -257,6 +294,178 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
     loadedDiagramId,
     navigate,
   ]);
+
+  // --- local file mode: mirror the diagram into the opened JSON file
+  const writeToFile = useCallback(async () => {
+    if (!hasFileHandle()) return;
+    try {
+      await saveFile(
+        serializeDiagram({
+          title,
+          database,
+          tables,
+          relationships,
+          notes,
+          subjectAreas: areas,
+          types,
+          enums,
+          views,
+          sqlHeader,
+        }),
+        `${title}.json`,
+      );
+    } catch (err) {
+      console.warn("file save failed:", err);
+      Toast.error(t("failed_to_save"));
+    }
+  }, [
+    title,
+    database,
+    tables,
+    relationships,
+    notes,
+    areas,
+    types,
+    enums,
+    views,
+    sqlHeader,
+    t,
+  ]);
+
+  const writeToFileRef = useRef(writeToFile);
+  writeToFileRef.current = writeToFile;
+
+  const applyFileText = useCallback(
+    (text, { silent, onError } = {}) => {
+      let parsed;
+      try {
+        parsed = parseDiagram(text);
+      } catch (err) {
+        if (onError) onError(err);
+        else Toast.error(err.message);
+        return false;
+      }
+      if (parsed.database) setDatabase(parsed.database);
+      if (parsed.title) setTitle(parsed.title);
+      setTables(parsed.tables);
+      setRelationships(parsed.relationships);
+      setNotes(parsed.notes);
+      setAreas(parsed.subjectAreas);
+      setTypes(parsed.types ?? []);
+      setEnums(parsed.enums ?? []);
+      setViews(parsed.views ?? []);
+      setSqlHeader(parsed.sqlHeader ?? "");
+      setUndoStack([]);
+      setRedoStack([]);
+      if (!silent) Toast.success(t("reloaded_from_file"));
+      return true;
+    },
+    [
+      setDatabase,
+      setTitle,
+      setTables,
+      setRelationships,
+      setNotes,
+      setAreas,
+      setTypes,
+      setEnums,
+      setViews,
+      setSqlHeader,
+      setUndoStack,
+      setRedoStack,
+      t,
+    ],
+  );
+
+  // Poll the file for external edits (text editor, Claude Code, ...).
+  const applyFileTextRef = useRef(applyFileText);
+  applyFileTextRef.current = applyFileText;
+  const saveStateRef = useRef(saveState);
+  saveStateRef.current = saveState;
+  const writeTimerRef = useRef(null);
+  useEffect(() => {
+    let busy = false;
+    // An external writer may be mid-write: an invalid file is retried on the
+    // next ticks and only reported if it stays invalid.
+    const invalid = { count: 0, reported: false };
+    const MAX_SILENT_RETRIES = 3;
+    const check = async () => {
+      if (busy || document.hidden || !hasFileHandle()) return;
+      // a local edit is about to be written; it wins over the stale file
+      if (saveStateRef.current === State.SAVING || writeTimerRef.current)
+        return;
+      busy = true;
+      try {
+        const text = await readIfChanged();
+        if (text === null) {
+          if (invalid.count > 0) invalid.count++;
+        } else {
+          invalid.count = 0;
+          invalid.reported = false;
+          const ok = applyFileTextRef.current(text, {
+            onError: () => {
+              invalid.count = 1;
+            },
+          });
+          invalid.text = ok ? null : text;
+        }
+        if (
+          invalid.count > MAX_SILENT_RETRIES &&
+          !invalid.reported &&
+          invalid.text
+        ) {
+          invalid.reported = true;
+          applyFileTextRef.current(invalid.text);
+        }
+      } finally {
+        busy = false;
+      }
+    };
+    const id = setInterval(check, 1000);
+    window.addEventListener("focus", check);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("focus", check);
+    };
+  }, []);
+
+  // Re-attach the file used in the previous session, when still permitted.
+  const setTransformRef = useRef(setTransform);
+  setTransformRef.current = setTransform;
+  const applyOpenedFile = useCallback(async (text) => {
+    if (!applyFileTextRef.current(text, { silent: true })) return;
+    const stored = await loadTransform();
+    if (stored) setTransformRef.current(stored);
+  }, []);
+
+  const [pendingFileName, setPendingFileName] = useState(null);
+  useEffect(() => {
+    restoreFile().then((text) => {
+      if (text !== null) applyOpenedFile(text);
+      else setPendingFileName(getPendingFileName());
+    });
+  }, [applyOpenedFile]);
+
+  const reopenFile = async () => {
+    try {
+      const text = await reopenPendingFile();
+      if (text !== null) await applyOpenedFile(text);
+    } catch (err) {
+      Toast.error(err.message);
+    }
+    setPendingFileName(null);
+  };
+  const dismissReopen = () => {
+    dismissPendingFile();
+    setPendingFileName(null);
+  };
+
+  // ControlPanel asks for an open/new file through this event.
+  useEffect(() => {
+    const onOpened = (e) => applyOpenedFile(e.detail);
+    window.addEventListener("drawdb:file-opened", onOpened);
+    return () => window.removeEventListener("drawdb:file-opened", onOpened);
+  }, [applyOpenedFile]);
 
   const moveToCloud = useCallback(async () => {
     if (typeof extensions.cloudSave !== "function" || !loadedDiagramId) return;
@@ -515,18 +724,20 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
   ]);
 
   useEffect(() => {
-    if (!settings.autosave || tables.length === 0) return;
-
-    const timer = setTimeout(() => setSaveState(State.SAVING), 500);
-    return () => clearTimeout(timer);
-  }, [transform.zoom, settings.autosave, tables.length, setSaveState]);
-
-  useEffect(() => {
     if (layout.readOnly) return;
 
     if (saveState !== State.SAVING) return;
 
     save();
+    // Debounced: a drag fires a save per movement.
+    clearTimeout(writeTimerRef.current);
+    writeTimerRef.current = setTimeout(async () => {
+      try {
+        await writeToFileRef.current();
+      } finally {
+        writeTimerRef.current = null;
+      }
+    }, 400);
   }, [saveState, layout, save]);
 
   useEffect(() => {
@@ -537,6 +748,7 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
 
   return (
     <div className="h-full flex flex-col overflow-hidden theme">
+      <TransformPersistence />
       <IdContext.Provider value={{ gistId, setGistId, version, setVersion }}>
         <ControlPanel
           title={title}
@@ -590,6 +802,27 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
               >
                 {t("return_to_current")}
               </Button>
+            </div>
+          )}
+          {pendingFileName && (
+            <div className="pointer-events-none absolute inset-x-0 top-3 z-50 flex justify-center">
+              <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-blue-300 bg-blue-50 px-5 py-1.5 shadow-md dark:border-sky-900/50 dark:bg-sky-900/30">
+                <i className="bi bi-file-earmark-code" />
+                <span className="text-sm">
+                  {t("reopen_file_prompt", { name: pendingFileName })}
+                </span>
+                <Button size="small" theme="solid" onClick={reopenFile}>
+                  {t("reopen")}
+                </Button>
+                <Button
+                  size="small"
+                  theme="borderless"
+                  type="tertiary"
+                  aria-label={t("dismiss")}
+                  icon={<i className="bi bi-x-lg" />}
+                  onClick={dismissReopen}
+                />
+              </div>
             </div>
           )}
           {(cloudOnly || typeof extensions.moveToCloudUpgrade === "function") &&

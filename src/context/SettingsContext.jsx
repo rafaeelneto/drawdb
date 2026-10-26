@@ -14,6 +14,7 @@ const defaultSettings = {
   showRelationshipLabels: true,
   showDebugCoordinates: false,
   showComments: false,
+  relationshipsMode: "show",
 };
 
 export const SettingsContext = createContext({

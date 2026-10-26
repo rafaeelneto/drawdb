@@ -4,6 +4,7 @@ import {
   ButtonGroup,
   Popover,
   Input,
+  TextArea,
   Divider,
 } from "@douyinfe/semi-ui";
 import ColorPicker from "../EditorSidePanel/ColorPicker";
@@ -12,6 +13,7 @@ import {
   IconDeleteStroked,
   IconLock,
   IconUnlock,
+  IconEyeOpened,
 } from "@douyinfe/semi-icons";
 import { Tab, Action, ObjectType, State } from "../../data/constants";
 import {
@@ -21,6 +23,7 @@ import {
   useSelect,
   useAreas,
   useSaveState,
+  useFocus,
 } from "../../hooks";
 import { useTranslation } from "react-i18next";
 import { useHover } from "usehooks-ts";
@@ -38,6 +41,8 @@ export default memo(function Area({
   const { settings } = useSettings();
   const { setSaveState } = useSaveState();
   const { updateArea } = useAreas();
+  const { focus, setFocus } = useFocus();
+  const isFocused = focus.areaId === data.id;
   const {
     selectedElement,
     setSelectedElement,
@@ -162,12 +167,14 @@ export default memo(function Area({
         onPointerDown={() => onPointerDown(data, ObjectType.AREA)}
       >
         <div
-          className={`w-full h-full p-2 rounded cursor-move border-2 ${
+          className={`relative w-full h-full p-2 rounded cursor-move border-2 ${
             isHovered
               ? "border-dashed border-blue-500"
-              : isSelected
-                ? "border-blue-500 opacity-100"
-                : "border-slate-400 opacity-100"
+              : isFocused
+                ? "border-blue-500"
+                : isSelected
+                  ? "border-blue-500 opacity-100"
+                  : "border-slate-400 opacity-100"
           }`}
           style={{ backgroundColor: `${data.color}66` }}
           onDoubleClick={edit}
@@ -176,12 +183,30 @@ export default memo(function Area({
             <div className="text-color select-none overflow-hidden text-ellipsis">
               {data.name}
             </div>
+            {data.label && !isHovered && (
+              <div className="absolute inset-x-0 bottom-0 top-8 px-3 pb-2 overflow-hidden whitespace-pre-wrap break-words text-color opacity-60 text-lg font-semibold select-none pointer-events-none">
+                {data.label}
+              </div>
+            )}
             {(isHovered || (areaIsOpen() && !layout.sidebar)) && (
               <ButtonGroup
                 type="tertiary"
                 size="small"
                 aria-label={t("area_actions")}
               >
+                <Button
+                  size="small"
+                  type={isFocused ? "primary" : "tertiary"}
+                  title={t("focus_area")}
+                  icon={<IconEyeOpened size="small" />}
+                  onClick={() =>
+                    setFocus(
+                      isFocused
+                        ? { areaId: null, tableId: null }
+                        : { areaId: data.id, tableId: null },
+                    )
+                  }
+                />
                 <Button
                   size="small"
                   type="tertiary"
@@ -345,6 +370,33 @@ function EditPopoverContent({ data }) {
           onColorPick={(color) => handleColorPick(color)}
         />
       </div>
+      <TextArea
+        value={data.label ?? ""}
+        placeholder={t("label")}
+        className="mb-2"
+        rows={3}
+        readonly={layout.readOnly}
+        onChange={(value) => updateArea(data.id, { label: value })}
+        onFocus={(e) => setEditField({ label: e.target.value })}
+        onBlur={(e) => {
+          if (e.target.value === editField.label) return;
+          setUndoStack((prev) => [
+            ...prev,
+            {
+              action: Action.EDIT,
+              element: ObjectType.AREA,
+              aid: data.id,
+              undo: editField,
+              redo: { label: e.target.value },
+              message: t("edit_area", {
+                areaName: data.name,
+                extra: "[label]",
+              }),
+            },
+          ]);
+          setRedoStack([]);
+        }}
+      />
       <Divider />
       <Button
         icon={<IconDeleteStroked />}

@@ -61,4 +61,18 @@ docker run -p 3000:80 -e VITE_BACKEND_URL=https://your-drawdb-server.example.com
 Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute to this project.
 
 ## Support
+
 - Join discussions: [Discord](https://discord.gg/BrjZgNrmR6)
+
+## Local file mode & CLI checks
+
+The editor can link to a local JSON file (File → Open JSON file…) and keeps it in sync both ways, so the file can be edited by hand or by Claude Code. Pan/zoom are not stored in the file.
+
+Relationships reference tables and fields by **id**, not name. Validate hand edits and generate SQL from the command line:
+
+```bash
+npm run check -- diagram.json            # schema + every relationship id exists + ids are unique
+npm run export:sql -- diagram.json       # writes schema.sql next to the file (-o <path> or --stdout)
+```
+
+`export:sql` uses the app's own `exportSQL()` for the diagram's `database` and refuses to export a file that fails `check`, so in CI you can run `check`, `export:sql` and then apply `schema.sql` to a throwaway Postgres.

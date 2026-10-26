@@ -64,6 +64,7 @@ import {
   useLayout,
   useSettings,
   useTransform,
+  useTransformActions,
   useDiagram,
   useUndoRedo,
   useSelect,
@@ -77,6 +78,13 @@ import {
   useNavigateWithParams,
 } from "../../hooks";
 import { enterFullscreen, exitFullscreen } from "../../utils/fullscreen";
+import {
+  openFile,
+  saveFileAs,
+  closeFile,
+  hasFileHandle,
+  serializeDiagram,
+} from "../../utils/filePersistence";
 import { dataURItoBlob } from "../../utils/utils";
 import {
   IconAddArea,
@@ -123,6 +131,11 @@ const EDITOR_HOTKEY = {
   preventDefault: true,
   ignoreEventWhen: (e) => Boolean(e.target?.closest?.(".monaco-editor")),
 };
+
+function ZoomLabel() {
+  const { transform } = useTransform();
+  return <>{Math.floor(transform.zoom * 100)}%</>;
+}
 
 export default function ControlPanel({
   title,
@@ -204,7 +217,7 @@ export default function ControlPanel({
   const { areas, setAreas, updateArea, addArea, deleteArea } = useAreas();
   const { undoStack, redoStack, setUndoStack, setRedoStack } = useUndoRedo();
   const { selectedElement, setSelectedElement } = useSelect();
-  const { transform, setTransform } = useTransform();
+  const { setTransform, getTransform } = useTransformActions();
   const { t, i18n } = useTranslation();
   const { version, gistId, setGistId } = useContext(IdContext);
   const isTemplate = useMatch("/editor/templates/:id");
@@ -1104,8 +1117,8 @@ export default function ControlPanel({
         areas,
         views,
         sqlHeader,
-        pan: transform.pan,
-        zoom: transform.zoom,
+        pan: getTransform().pan,
+        zoom: getTransform().zoom,
         ...(databases[database].hasEnums && { enums }),
         ...(databases[database].hasTypes && { types }),
       };
@@ -1129,6 +1142,40 @@ export default function ControlPanel({
       return;
     }
     setSaveState(State.SAVING);
+  };
+  const openLocalFile = async () => {
+    try {
+      const text = await openFile();
+      if (text !== null) {
+        window.dispatchEvent(
+          new CustomEvent("drawdb:file-opened", { detail: text }),
+        );
+      }
+    } catch (err) {
+      Toast.error(err.message);
+    }
+  };
+  const saveLocalFileAs = async () => {
+    try {
+      const ok = await saveFileAs(
+        serializeDiagram({
+          title,
+          database,
+          tables,
+          relationships,
+          notes,
+          subjectAreas: areas,
+          types,
+          enums,
+          views,
+          sqlHeader,
+        }),
+        `${title}.json`,
+      );
+      if (ok) Toast.success(t("saved_to_file"));
+    } catch (err) {
+      Toast.error(err.message);
+    }
   };
   const { cloud, local } = useDiagramList();
   const recentlyOpenedDiagrams = useMemo(() => {
@@ -1165,8 +1212,8 @@ export default function ControlPanel({
       areas,
       views,
       sqlHeader,
-      pan: transform.pan,
-      zoom: transform.zoom,
+      pan: getTransform().pan,
+      zoom: getTransform().zoom,
       ...(databases[database].hasEnums && { enums }),
       ...(databases[database].hasTypes && { types }),
     };
@@ -1264,6 +1311,16 @@ export default function ControlPanel({
         ],
 
         function: () => {},
+      },
+      open_file: {
+        function: openLocalFile,
+      },
+      save_to_file: {
+        function: saveLocalFileAs,
+      },
+      close_file: {
+        function: () => closeFile(),
+        disabled: !hasFileHandle(),
       },
       save: {
         function: save,
@@ -1871,6 +1928,21 @@ export default function ControlPanel({
         function: resetView,
         shortcut: "Enter/Return",
       },
+      relationships_mode: {
+        state: (
+          <span className="text-gray-400">
+            {t(`relationships_mode_${settings.relationshipsMode ?? "show"}`)}
+          </span>
+        ),
+        function: () =>
+          setSettings((prev) => ({
+            ...prev,
+            relationshipsMode:
+              { show: "dim", dim: "hide", hide: "show" }[
+                prev.relationshipsMode ?? "show"
+              ] ?? "show",
+          })),
+      },
       show_comments: {
         state: settings.showComments ? (
           <i className="bi bi-toggle-on" />
@@ -2218,7 +2290,7 @@ export default function ControlPanel({
           >
             <div className="py-1 px-2 hover-2 rounded-sm flex items-center justify-center">
               <div className="w-[40px]">
-                {Math.floor(transform.zoom * 100)}%
+                <ZoomLabel />
               </div>
               <div>
                 <IconCaretdown />

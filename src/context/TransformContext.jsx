@@ -1,6 +1,10 @@
-import { createContext, useCallback, useState } from "react";
+import { createContext, useCallback, useMemo, useRef, useState } from "react";
 
 export const TransformContext = createContext(null);
+
+// Stable (never changes on pan/zoom): lets code that only needs the current
+// transform inside a handler avoid re-rendering on every pan frame.
+export const TransformActionsContext = createContext(null);
 
 export default function TransformContextProvider({ children }) {
   const [transform, setTransformInternal] = useState({
@@ -38,9 +42,18 @@ export default function TransformContextProvider({ children }) {
     [setTransformInternal],
   );
 
+  const transformRef = useRef(transform);
+  transformRef.current = transform;
+  const actions = useMemo(
+    () => ({ setTransform, getTransform: () => transformRef.current }),
+    [setTransform],
+  );
+
   return (
-    <TransformContext.Provider value={{ transform, setTransform }}>
-      {children}
-    </TransformContext.Provider>
+    <TransformActionsContext.Provider value={actions}>
+      <TransformContext.Provider value={{ transform, setTransform }}>
+        {children}
+      </TransformContext.Provider>
+    </TransformActionsContext.Provider>
   );
 }

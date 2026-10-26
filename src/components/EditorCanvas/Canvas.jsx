@@ -30,6 +30,7 @@ import {
   useSaveState,
   useCollab,
   useViews,
+  useFocus,
 } from "../../hooks";
 import { useTranslation } from "react-i18next";
 import { useEventListener } from "usehooks-ts";
@@ -45,6 +46,7 @@ import {
   resolveViewColumns,
 } from "../../utils/views";
 import { getRectFromEndpoints, isInsideRect } from "../../utils/rect";
+import { getElementsInArea } from "../../utils/areas";
 import { State, noteWidth } from "../../data/constants";
 import { nanoid } from "nanoid";
 
@@ -74,6 +76,7 @@ export default function Canvas() {
   const { settings } = useSettings();
   const { setUndoStack, setRedoStack } = useUndoRedo();
   const { transform, setTransform } = useTransform();
+  const { focus, setFocus } = useFocus();
   const {
     selectedElement,
     setSelectedElement,
@@ -179,6 +182,79 @@ export default function Canvas() {
     }
     return ids;
   }, [bulkSelectedElements, selectedElement.element, selectedElement.id]);
+
+  // Ids of what stays fully visible while an area or a table is focused.
+  // null means no focus is active.
+  const focusSets = useMemo(() => {
+    const area = focus.areaId !== null ? areas[focus.areaId] : null;
+    if (area) {
+      const inside = getElementsInArea(area, {
+        tables,
+        views,
+        notes,
+        showComments: settings.showComments,
+        relationships,
+      });
+      const idsOf = (type) =>
+        new Set(inside.filter((e) => e.type === type).map((e) => e.element.id));
+      const tableIds = idsOf(ObjectType.TABLE);
+      return {
+        areaId: area.id,
+        tableIds,
+        viewIds: idsOf(ObjectType.VIEW),
+        noteIds: idsOf(ObjectType.NOTE),
+        relIds: new Set(
+          relationships
+            .filter(
+              (r) => tableIds.has(r.startTableId) && tableIds.has(r.endTableId),
+            )
+            .map((r) => r.id),
+        ),
+      };
+    }
+    if (focus.tableId !== null && tablesById.has(focus.tableId)) {
+      const rels = relationships.filter(
+        (r) =>
+          r.startTableId === focus.tableId || r.endTableId === focus.tableId,
+      );
+      const tableIds = new Set([focus.tableId]);
+      rels.forEach((r) => {
+        tableIds.add(r.startTableId);
+        tableIds.add(r.endTableId);
+      });
+      return {
+        areaId: null,
+        tableIds,
+        viewIds: new Set(),
+        noteIds: new Set(),
+        relIds: new Set(rels.map((r) => r.id)),
+      };
+    }
+    return null;
+  }, [
+    focus,
+    areas,
+    tables,
+    views,
+    notes,
+    relationships,
+    tablesById,
+    settings.showComments,
+  ]);
+
+  // No style at all unless something is dimmed: an opacity/transition on the
+  // wrapper groups forces the foreignObject tables to repaint while panning.
+  const dimStyle = (isDimmed) =>
+    isDimmed ? { opacity: 0.2, transition: "opacity 0.2s ease" } : undefined;
+
+  useEffect(() => {
+    if (!focusSets) return;
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") setFocus({ areaId: null, tableId: null });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [focusSets, setFocus]);
 
   const isSameElement = (el1, el2) => {
     return el1.id === el2.id && el1.type === el2.type;
@@ -354,7 +430,26 @@ export default function Canvas() {
       return;
     }
 
-    if (!isSelected) {
+    if (type === ObjectType.AREA && (!isSelected || e.altKey)) {
+      // an area carries the elements inside it; alt moves the area alone
+      const carried = e.altKey
+        ? []
+        : getElementsInArea(element, {
+            tables,
+            views,
+            notes,
+            showComments: settings.showComments,
+            relationships,
+          })
+            .filter((c) => !c.element.locked)
+            .map((c) => ({
+              id: c.element.id,
+              type: c.type,
+              currentCoords: { x: c.element.x, y: c.element.y },
+              initialCoords: { x: c.element.x, y: c.element.y },
+            }));
+      setBulkSelectedElements([elementInBulk, ...carried]);
+    } else if (!isSelected) {
       setBulkSelectedElements([elementInBulk]);
     }
     setDragging({
@@ -549,6 +644,8 @@ export default function Canvas() {
       });
       if (elementPointerDown !== null) {
         handlePointerDownOnElement(e, elementPointerDown);
+      } else if (focusSets) {
+        setFocus({ areaId: null, tableId: null });
       }
       pointer.setStyle("crosshair");
     } else if (isMouseMiddleButton || isMouseRightButton) {
@@ -855,45 +952,77 @@ export default function Canvas() {
             </>
           )}
           {areas.map((a) => (
-            <Area
+            <g
               key={a.id}
-              data={a}
-              setResize={setAreaResize}
-              setInitDimensions={setAreaInitDimensions}
-              onPointerDown={handleElementPointerDown}
-            />
+              style={dimStyle(focusSets && focusSets.areaId !== a.id)}
+            >
+              <Area
+                data={a}
+                setResize={setAreaResize}
+                setInitDimensions={setAreaInitDimensions}
+                onPointerDown={handleElementPointerDown}
+              />
+            </g>
           ))}
-          {relationships.map((e) => (
-            <Relationship
-              key={e.id}
-              data={e}
-              startTable={tablesById.get(e.startTableId)}
-              endTable={tablesById.get(e.endTableId)}
-              startRelatedFieldKeys={relatedFieldKeysByTable.get(
-                e.startTableId,
-              )}
-              endRelatedFieldKeys={relatedFieldKeysByTable.get(e.endTableId)}
-            />
-          ))}
+          {relationships.map((e) => {
+            const highlighted =
+              focusSets?.relIds.has(e.id) ||
+              selectedTableIds.has(e.startTableId) ||
+              selectedTableIds.has(e.endTableId);
+            const mode = settings.relationshipsMode;
+            if (mode === "hide" && !highlighted) return null;
+            const dimmed = focusSets
+              ? !focusSets.relIds.has(e.id)
+              : mode === "dim" && !highlighted;
+            return (
+              <g
+                key={e.id}
+                className={
+                  dimmed
+                    ? "relationship-dimmed"
+                    : focusSets?.relIds.has(e.id)
+                      ? "relationship-focused"
+                      : ""
+                }
+              >
+                <Relationship
+                  data={e}
+                  startTable={tablesById.get(e.startTableId)}
+                  endTable={tablesById.get(e.endTableId)}
+                  startRelatedFieldKeys={relatedFieldKeysByTable.get(
+                    e.startTableId,
+                  )}
+                  endRelatedFieldKeys={relatedFieldKeysByTable.get(
+                    e.endTableId,
+                  )}
+                />
+              </g>
+            );
+          })}
           {tables.map((table) => (
-            <Table
+            <g
               key={table.id}
-              tableData={table}
-              isSelected={selectedTableIds.has(table.id)}
-              database={database}
-              relatedFieldKeys={relatedFieldKeysByTable.get(table.id)}
-              setHoveredTable={setHoveredTable}
-              handleGripField={handleGripField}
-              setLinkingLine={setLinkingLine}
-              onPointerDown={handleElementPointerDown}
-            />
+              style={dimStyle(focusSets && !focusSets.tableIds.has(table.id))}
+            >
+              <Table
+                tableData={table}
+                isSelected={selectedTableIds.has(table.id)}
+                database={database}
+                relatedFieldKeys={relatedFieldKeysByTable.get(table.id)}
+                setHoveredTable={setHoveredTable}
+                handleGripField={handleGripField}
+                setLinkingLine={setLinkingLine}
+                onPointerDown={handleElementPointerDown}
+              />
+            </g>
           ))}
           {views.map((view) => (
-            <View
+            <g
               key={view.id}
-              viewData={view}
-              onPointerDown={handleElementPointerDown}
-            />
+              style={dimStyle(focusSets && !focusSets.viewIds.has(view.id))}
+            >
+              <View viewData={view} onPointerDown={handleElementPointerDown} />
+            </g>
           ))}
           {linking && (
             <path
@@ -905,11 +1034,12 @@ export default function Canvas() {
           )}
           <Slot name="svg-overlay" />
           {notes.map((n) => (
-            <Note
+            <g
               key={n.id}
-              data={n}
-              onPointerDown={handleElementPointerDown}
-            />
+              style={dimStyle(focusSets && !focusSets.noteIds.has(n.id))}
+            >
+              <Note data={n} onPointerDown={handleElementPointerDown} />
+            </g>
           ))}
           {bulkSelectRect.show && (
             <rect
