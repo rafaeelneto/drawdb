@@ -31,7 +31,8 @@ import {
   useNavigateWithParams,
 } from "../hooks";
 import FloatingControls from "./FloatingControls";
-import { Button, Modal, Tag, Toast } from "@douyinfe/semi-ui";
+import StartModal from "./StartModal";
+import { Button, Modal, Toast } from "@douyinfe/semi-ui";
 import {
   hasFileHandle,
   saveFile,
@@ -75,6 +76,17 @@ function TransformPersistence() {
     const id = setTimeout(() => saveTransform(transform), 500);
     return () => clearTimeout(id);
   }, [transform]);
+
+  // without a file, zoom is saved with the diagram, so autosave on zoom
+  const { settings } = useSettings();
+  const { setSaveState } = useSaveState();
+  const { tables } = useDiagram();
+  useEffect(() => {
+    if (hasFileHandle() || !settings.autosave || tables.length === 0) return;
+    const timer = setTimeout(() => setSaveState(State.SAVING), 500);
+    return () => clearTimeout(timer);
+  }, [transform.zoom, settings.autosave, tables.length, setSaveState]);
+
   return null;
 }
 
@@ -90,6 +102,7 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
   const [showSelectDbModal, setShowSelectDbModal] = useState(false);
   const [showRestoreModal, setShowRestoreModal] = useState(false);
   const [selectedDb, setSelectedDb] = useState("");
+  const [startWith, setStartWith] = useState(null);
 
   const [diagramSource, setDiagramSource] = useState(null);
   const [dismissedBanners, setDismissedBanners] =
@@ -743,6 +756,9 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
           lastSaved={lastSaved}
           setLastSaved={setLastSaved}
           toolbarContainer={toolbarContainer}
+          startWith={startWith}
+          setStartWith={setStartWith}
+          onBackToStart={() => setShowSelectDbModal(true)}
         />
       </IdContext.Provider>
       <div
@@ -845,55 +861,19 @@ export default function WorkSpace({ forcedDiagramId } = {}) {
         </div>
         <Slot name="right-panel" />
       </div>
-      <Modal
-        centered
-        size="medium"
-        closable={false}
-        hasCancel={false}
-        title={t("pick_db")}
-        okText={t("confirm")}
+      <StartModal
         visible={showSelectDbModal}
-        onOk={() => {
-          if (selectedDb === "") return;
-          setDatabase(selectedDb);
+        onStart={(database, option) => {
+          setSelectedDb(database);
+          setDatabase(database);
           setShowSelectDbModal(false);
+          if (option.modal) setStartWith(option);
         }}
-        okButtonProps={{ disabled: selectedDb === "" }}
-      >
-        <div className="grid grid-cols-3 gap-4 place-content-center">
-          {Object.values(databases).map((x) => (
-            <div
-              key={x.name}
-              onClick={() => setSelectedDb(x.label)}
-              className={`space-y-3 p-3 rounded-md border-2 select-none ${
-                settings.mode === "dark"
-                  ? "bg-zinc-700 hover:bg-zinc-600"
-                  : "bg-zinc-100 hover:bg-zinc-200"
-              } ${selectedDb === x.label ? "border-zinc-400" : "border-transparent"}`}
-            >
-              <div className="flex items-center justify-between">
-                <div className="font-semibold">{x.name}</div>
-                {x.beta && (
-                  <Tag size="small" color="light-blue">
-                    Beta
-                  </Tag>
-                )}
-              </div>
-              {x.image && (
-                <img
-                  src={x.image}
-                  className="h-8"
-                  style={{
-                    filter:
-                      "opacity(0.4) drop-shadow(0 0 0 white) drop-shadow(0 0 0 white)",
-                  }}
-                />
-              )}
-              <div className="text-xs">{x.description}</div>
-            </div>
-          ))}
-        </div>
-      </Modal>
+        onTemplate={(templateId) => {
+          setShowSelectDbModal(false);
+          navigate(`/editor/templates/${templateId}`, { replace: true });
+        }}
+      />
       <Modal
         visible={showRestoreModal}
         centered
